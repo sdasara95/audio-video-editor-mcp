@@ -1,11 +1,29 @@
 # ============================================================================
 # MCP SERVER : stdio server implementing audio and video editing tools
 # ============================================================================
+import os
+import sys
+import subprocess
+import traceback
+
+# Ensure ffmpeg is in PATH
+if '/usr/local/bin' not in os.environ.get('PATH', ''):
+    os.environ['PATH'] = '/usr/local/bin:' + os.environ.get('PATH', '')
+
 from fastmcp import FastMCP
 import ffmpeg
 import yt_dlp
-import os
 from pathlib import Path
+
+# Monkey-patch ffmpeg to pass the correct environment to subprocess
+_original_ffmpeg_run = ffmpeg.run
+def _patched_ffmpeg_run(*args, **kwargs):
+    env = os.environ.copy()
+    env['PATH'] = '/usr/local/bin:' + env.get('PATH', '')
+    kwargs['env'] = env
+    return _original_ffmpeg_run(*args, **kwargs)
+
+ffmpeg.run = _patched_ffmpeg_run
 
 # Initialize FastMCPServer
 mcp = FastMCP("AudioVideoEditorMCP", version="1.0.0")
@@ -14,7 +32,7 @@ mcp = FastMCP("AudioVideoEditorMCP", version="1.0.0")
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-@mcp.tool()
+# @mcp.tool()
 def download_youtube_video(url: str, output_name: str = "downloaded_video.mp4") -> str:
     """
     Download a YouTube video 
@@ -25,9 +43,21 @@ def download_youtube_video(url: str, output_name: str = "downloaded_video.mp4") 
         str: The path to the downloaded video file.
     """
     ydl_opts = {
+        'external_downloader': 'aria2c',
+        'external_downloader_args': [
+        '-x', '16',  # Max concurrent downloads for a single file
+        '-s', '16',  # Max connection per server for a single download
+        '-j', '16',  # Max overall concurrent downloads (can be adjusted)
+        '-k', '1M',  # Minimum split size for file allocation
+        '--log-level=warn', # Log level (info, warn, error)
+        '--file-allocation=none' # Avoid pre-allocating file space
+        ],
         'outtmpl': str(OUTPUT_DIR / output_name),
-        'format': 'best[ext=mp4]',
+        'format': 'best[ext=mp4]/best',
         'merge_output_format': 'mp4',
+        'ignoreerrors': True,
+        'dump_single_json': True,
+        "skip_playlist_after_errors":-1
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -36,7 +66,7 @@ def download_youtube_video(url: str, output_name: str = "downloaded_video.mp4") 
     except Exception as e:
         return f"Error downloading video: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def trim_video(input_path: str, start_time: str, end_time: str, output_name: str = "trimmed_video.mp4") -> str:
     """
     Trim a video file based on start and end time timestamps.
@@ -49,6 +79,7 @@ def trim_video(input_path: str, start_time: str, end_time: str, output_name: str
         str: The path to the trimmed video file.
     """
     output_path = OUTPUT_DIR / output_name
+
     try:
         (
             ffmpeg
@@ -60,7 +91,7 @@ def trim_video(input_path: str, start_time: str, end_time: str, output_name: str
     except Exception as e:
         return f"Error trimming video: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def merge_videos(input_path1: str, input_path2: str, output_name: str = "merged_video.mp4") -> str:
     """
     Merge multiple video files into one single video file.
@@ -88,7 +119,7 @@ def merge_videos(input_path1: str, input_path2: str, output_name: str = "merged_
     except Exception as e:
         return f"Error merging videos: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def extract_audio(input_path: str, output_name: str = "extracted_audio.mp3") -> str:
     """
     Extract audio from a video file.
@@ -110,7 +141,7 @@ def extract_audio(input_path: str, output_name: str = "extracted_audio.mp3") -> 
     except Exception as e:
         return f"Error extracting audio: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def trim_audio(input_path: str, start_time: str, end_time: str, output_name: str = "trimmed_audio.mp3") -> str:
     """
     Trim an audio file based on start and end time timestamps.
@@ -134,7 +165,7 @@ def trim_audio(input_path: str, start_time: str, end_time: str, output_name: str
     except Exception as e:
         return f"Error trimming audio: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def convert_video_format(input_path: str, output_format: str = "avi", output_name: str = "converted_video") -> str:
     """
     Convert a video file to a different format.
@@ -157,7 +188,7 @@ def convert_video_format(input_path: str, output_format: str = "avi", output_nam
     except Exception as e:
         return f"Error converting video format: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def add_watermark(input_path: str, watermark_path: str, position: str = "10:10", output_name: str = "watermarked_video.mp4") -> str:
     """
     Add a watermark to a video file.
@@ -183,7 +214,7 @@ def add_watermark(input_path: str, watermark_path: str, position: str = "10:10",
     except Exception as e:
         return f"Error adding watermark: {str(e)}"  
 
-@mcp.tool()
+# @mcp.tool()
 def extract_frames(input_path: str, interval: int = 1, output_dir_name: str = "extracted_frames") -> str:
     """
     Extract frames from a video file at specified intervals.
@@ -208,7 +239,7 @@ def extract_frames(input_path: str, interval: int = 1, output_dir_name: str = "e
     except Exception as e:
         return f"Error extracting frames: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def change_audio_speed(input_path: str, speed_factor: float, output_name: str = "speed_changed_audio.mp3") -> str:
     """
     Change the speed of an audio file.
@@ -232,7 +263,7 @@ def change_audio_speed(input_path: str, speed_factor: float, output_name: str = 
     except Exception as e:
         return f"Error changing audio speed: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def change_video_speed(input_path: str, speed_factor: float, output_name: str = "speed_changed_video.mp4") -> str:
     """
     Change the speed of a video file.
@@ -256,7 +287,7 @@ def change_video_speed(input_path: str, speed_factor: float, output_name: str = 
     except Exception as e:
         return f"Error changing video speed: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def mute_video_audio(input_path: str, output_name: str = "muted_video.mp4") -> str:
     """
     Mute the audio of a video file.
@@ -278,7 +309,7 @@ def mute_video_audio(input_path: str, output_name: str = "muted_video.mp4") -> s
     except Exception as e:
         return f"Error muting video audio: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def create_gif(input_path: str, start_time: str, duration: str, fps: int = 10, width: int = 480, output_name: str = "output.gif") -> str:
     """
     Create a GIF from a segment of a video file.
@@ -297,7 +328,6 @@ def create_gif(input_path: str, start_time: str, duration: str, fps: int = 10, w
         (
             ffmpeg
             .input(input_path, ss=start_time, t=duration)
-            .filter
             .filter('scale', width, -1)
             .output(str(output_path), loop=0)
             .run(overwrite_output=True, capture_stdout=True, capture_stderr=True)
@@ -308,4 +338,29 @@ def create_gif(input_path: str, start_time: str, duration: str, fps: int = 10, w
 
 # Run the server
 if __name__ == "__main__":
-    mcp.run()
+    # mcp.run()
+    # mcp.run(transport="http", host="127.0.0.1", port=8000)
+    url = "https://www.youtube.com/watch?v=y96lLt1OZCM"
+    # download_youtube_video(url)
+    # trim_video("outputs/downloaded_video.mp4", "00:00:00", "00:00:20")
+    # merge_videos(input_path1="outputs/downloaded_video.mp4", input_path2="outputs/trimmed_video.mp4", output_name="outputs/merged_video.mp4")
+    
+    output_name = "merged_video.mp4"
+    output_path = OUTPUT_DIR / output_name
+    
+    # with open(OUTPUT_DIR / "file_list.txt", "w") as f:
+    #     for path in (input_path1, input_path2):
+    #         f.write(f"file '{path}'\n")
+    print(output_path)
+    try:
+        (
+            ffmpeg
+            .input(str(OUTPUT_DIR / "file_list.txt"), format='concat', safe=0)
+            .output(str(output_path), c='copy')
+            # .run(overwrite_output=True, capture_stdout=True, capture_stderr=True)
+            .run()
+        )
+        os.remove(OUTPUT_DIR / "file_list.txt")
+    except ffmpeg.Error as e:
+        print(f"Error merging videos: {str(e)}") 
+        traceback.print_exc()   
